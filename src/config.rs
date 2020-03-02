@@ -13,13 +13,15 @@ use std::path::Path;
 pub enum ConfigError {
     Io(io::Error),
     Yaml(serde_yaml::Error),
+    UserCancelled,
 }
 
 impl error::Error for ConfigError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match *self {
+        match &*self {
             ConfigError::Io(ref err) => Some(err),
             ConfigError::Yaml(ref err) => Some(err),
+            UserCancelled => None,
         }
     }
 }
@@ -29,6 +31,7 @@ impl fmt::Display for ConfigError {
         match *self {
             ConfigError::Io(ref err) => write!(f, "Error: IO: {}", err),
             ConfigError::Yaml(ref err) => write!(f, "Error: YAML: {}", err),
+            ConfigError::UserCancelled => write!(f, "Error: User Cancelled"),
         }
     }
 }
@@ -89,7 +92,7 @@ impl SaveAndLoad for Config {}
 impl Config {
     pub fn new(auth_info: AuthInfo, profiles: &[Profile]) -> Config {
         Config {
-            auth_info: auth_info,
+            auth_info,
             profiles: profiles.to_vec(),
         }
     }
@@ -104,13 +107,21 @@ impl Config {
             profiles: vec![Profile::create_sample()],
         }
     }
+
+    pub fn auth_info(&self) -> &AuthInfo {
+        &self.auth_info
+    }
+
+    pub fn profiles(&self) -> &[Profile] {
+        &self.profiles
+    }
 }
 
 #[derive(Eq, PartialEq, Clone, Hash, Default, Debug, Serialize, Deserialize)]
 pub struct AuthInfo {
-    user_id: u64,
-    token: String,
-    secret: String,
+    pub user_id: u64,
+    pub token: String,
+    pub secret: String,
 }
 
 impl AuthInfo {

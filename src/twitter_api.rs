@@ -10,9 +10,8 @@ use std::collections::HashMap;
 
 type HmacSha1 = Hmac<Sha1>;
 
-static TOKEN_FILE: &'static str = "token.yaml";
 // twitter api endpoints
-static TAE_REQUEST_TOKEN: &'static str = "https://api.twitter.com/oauth/request_token";
+const TAE_REQUEST_TOKEN: &str = "https://api.twitter.com/oauth/request_token";
 
 const FRAGMENT: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'*')
@@ -61,6 +60,12 @@ fn create_oauth_signature(
     mac.input(payload.as_bytes());
     let hash = mac.result().code();
     base64::encode(&hash)
+}
+
+fn check_oauth_sig_gen(){
+    create_oauth_signature("POST", "https://photos.example.net/initiate",
+    ""
+     consumer_secret: &str, token_secret: &str, params: &HashMap<&str, &str>)
 }
 
 fn get_request_header(endpoint: &str) {}
