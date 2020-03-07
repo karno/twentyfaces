@@ -1,3 +1,4 @@
+use super::twitter_api;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
@@ -13,6 +14,7 @@ use std::path::Path;
 pub enum ConfigError {
     Io(io::Error),
     Yaml(serde_yaml::Error),
+    Twitter(twitter_api::Error),
     UserCancelled,
 }
 
@@ -31,6 +33,7 @@ impl fmt::Display for ConfigError {
         match *self {
             ConfigError::Io(ref err) => write!(f, "Error: IO: {}", err),
             ConfigError::Yaml(ref err) => write!(f, "Error: YAML: {}", err),
+            ConfigError::Twitter(ref err) => write!(f, "Error: Twitter: {}", err),
             ConfigError::UserCancelled => write!(f, "Error: User Cancelled"),
         }
     }
@@ -45,6 +48,15 @@ impl From<io::Error> for ConfigError {
 impl From<serde_yaml::Error> for ConfigError {
     fn from(err: serde_yaml::Error) -> ConfigError {
         ConfigError::Yaml(err)
+    }
+}
+
+impl From<twitter_api::Error> for ConfigError {
+    fn from(err: twitter_api::Error) -> ConfigError {
+        match err {
+            twitter_api::Error::Io(err) => ConfigError::Io(err),
+            err => ConfigError::Twitter(err),
+        }
     }
 }
 
@@ -66,8 +78,8 @@ pub trait SaveAndLoad: Sized + Serialize + DeserializeOwned {
 
 #[derive(Eq, PartialEq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct ApiKey {
-    consumer_key: String,
-    consumer_secret: String,
+    pub consumer_key: String,
+    pub consumer_secret: String,
 }
 
 impl SaveAndLoad for ApiKey {}

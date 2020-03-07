@@ -1,5 +1,6 @@
 mod config;
 mod init;
+mod twitter_api;
 
 use std::error::Error;
 use std::{io, process, thread, time};

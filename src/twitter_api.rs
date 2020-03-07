@@ -1,71 +1,70 @@
 // this code derived from https://qiita.com/hppRC/items/05a81b56d12d663d03e0
 
-use base64;
-use chrono::Utc;
-use hmac::{Hmac, Mac};
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-use reqwest::header::*;
-use sha1::{Digest, Sha1};
-use std::collections::HashMap;
+pub mod auth;
+pub mod misc;
+pub mod models;
 
-type HmacSha1 = Hmac<Sha1>;
+use reqwest;
+use std::error;
+use std::fmt;
+use std::io;
 
-// twitter api endpoints
-const TAE_REQUEST_TOKEN: &str = "https://api.twitter.com/oauth/request_token";
-
-const FRAGMENT: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC
-    .remove(b'*')
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_');
-
-#[derive(Clone, Debug)]
-struct ConsumerKeySecret {
-    consumer_key: String,
-    consumer_secret: String,
+#[derive(Debug)]
+pub enum Error {
+    Io(io::Error),
+    Network(reqwest::Error),
+    Http(u16, String),
+    Twitter(TwitterError),
 }
 
-#[derive(Clone, Debug)]
-struct AccessToken {
-    token: String,
-    secret: String,
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match &*self {
+            Error::Io(ref err) => Some(err),
+            Error::Network(ref err) => Some(err),
+            Error::Twitter(ref err) => Some(err),
+            Error::Http(_, __) => None,
+        }
+    }
 }
 
-fn encode(input: &str) -> percent_encoding::PercentEncode {
-    utf8_percent_encode(input, FRAGMENT)
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Error::Io(ref err) => write!(f, "Error: IO: {}", err),
+            Error::Network(ref err) => write!(f, "Error: Network: {}", err),
+            Error::Twitter(ref err) => write!(f, "Error: Twitter: {}", err),
+            Error::Http(ref code, ref msg) => write!(f, "Error: HTTP {}: {}", code, msg),
+        }
+    }
 }
 
-fn create_oauth_signature(
-    http_method: &str,
-    endpoint: &str,
-    consumer_secret: &str,
-    token_secret: &str,
-    params: &HashMap<&str, &str>,
-) -> String {
-    let key: String = format!("{}&{}", encode(consumer_secret), encode(token_secret));
-    let mut params: Vec<(&&str, &&str)> = params.into_iter().collect();
-    params.sort();
-    let param = params
-        .into_iter()
-        .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
-        .collect::<Vec<String>>()
-        .join("&");
-    let payload = format!(
-        "{}&{}&{}",
-        encode(http_method),
-        encode(endpoint),
-        encode(&param)
-    );
-    let mut mac = HmacSha1::new_varkey(key.as_bytes()).expect("any size of keys can be accepted.");
-    mac.input(payload.as_bytes());
-    let hash = mac.result().code();
-    base64::encode(&hash)
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::Io(err)
+    }
 }
 
-fn check_oauth_sig_gen(){
-    create_oauth_signature("POST", "https://photos.example.net/initiate",
-    ""
-     consumer_secret: &str, token_secret: &str, params: &HashMap<&str, &str>)
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Error {
+        Error::Network(err)
+    }
 }
 
-fn get_request_header(endpoint: &str) {}
+#[derive(Debug)]
+pub struct TwitterError {
+    pub code: u32,
+    pub message: String,
+}
+
+impl error::Error for TwitterError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
+impl fmt::Display for TwitterError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error Code: {}: {}", self.code, self.message)
+    }
+}

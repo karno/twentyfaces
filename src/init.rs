@@ -1,4 +1,5 @@
 use super::config;
+use super::twitter_api::misc;
 use config::*;
 use futures::future::TryFutureExt;
 use std::iter::Iterator;
@@ -30,7 +31,8 @@ async fn create_api_key() -> Result<ApiKey, ConfigError> {
 }
 
 async fn validate_api_key(api_key: ApiKey) -> Result<ApiKey, ConfigError> {
-    Err(ConfigError::UserCancelled)
+    misc::check_api_key(&api_key).await?;
+    Ok(api_key)
 }
 
 pub async fn load_or_init_config(
@@ -97,7 +99,7 @@ fn acquire_user_input<'a>(keys: &[&'a str]) -> Option<Vec<String>> {
                         return None;
                     }
                     s => {
-                        println!("unknown input: {}.", s);
+                        println!("unknown input: \"{}\".", s);
                         continue;
                     }
                 }
