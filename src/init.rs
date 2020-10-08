@@ -1,3 +1,5 @@
+use crate::twitter_api::auth;
+
 use super::config;
 use super::twitter_api::misc;
 use config::*;
@@ -45,17 +47,33 @@ pub async fn load_or_init_config(
     } else {
         // create configuration
         println!("config file not found -> create config file.");
-        let config = create_config(config_file).await?;
+        let config = create_config(api_key).await?;
         config.save(config_file)?;
         Ok(config)
     }
 }
 
-async fn create_config(config_file: &str) -> Result<Config, ConfigError> {
-    Ok(Config::new_example(
-        DEFAULT_ID,
-        "sample_token",
-        "sample_secret",
+async fn create_config(api_key: &ApiKey) -> Result<Config, ConfigError> {
+    let auth_info = create_token(api_key).await?;
+    Ok(Config::new_example(auth_info))
+}
+
+async fn create_token(api_key: &ApiKey) -> Result<AuthInfo, ConfigError> {
+    let req_token = auth::request_token(api_key).await?;
+    println!(
+        "Please access to proceed the authorization: {}",
+        auth::get_authorization_url(&req_token)
+    );
+    let pin = acquire_user_input(&["PIN"]).ok_or(ConfigError::UserCancelled)?;
+    let pin = pin.into_iter().next().ok_or(ConfigError::UserCancelled)?;
+    let acc_token = auth::access_token(api_key, req_token, pin).await?;
+    let user_id = acc_token.remain.get("user_id").unwrap();
+    let user_id = user_id.parse::<u64>().unwrap();
+
+    Ok(AuthInfo::new(
+        user_id,
+        acc_token.oauth_token,
+        acc_token.oauth_token_secret,
     ))
 }
 
@@ -89,7 +107,7 @@ fn acquire_user_input<'a>(keys: &[&'a str]) -> Option<Vec<String>> {
             input.clear();
             if stdin().read_line(&mut input).is_ok() {
                 match input.chars().next().unwrap_or('y') {
-                    'Y' | 'y' => return Some(inputs),
+                    'Y' | 'y' | '\n' => return Some(inputs),
                     'N' | 'n' => {
                         println!("please re-input.");
                         print!("Your input is correct? ([Y]es/[n]o/[c]ancel): ");

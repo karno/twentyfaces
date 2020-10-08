@@ -1,70 +1,77 @@
-// this code derived from https://qiita.com/hppRC/items/05a81b56d12d663d03e0
+use thiserror::Error;
 
 pub mod auth;
 pub mod misc;
 pub mod models;
+pub mod statuses;
 
 use reqwest;
 use std::error;
 use std::fmt;
 use std::io;
 
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-    Network(reqwest::Error),
-    Http(u16, String),
-    Twitter(TwitterError),
-}
+pub type TwitterResult<T> = std::result::Result<T, TwitterError>;
 
-impl error::Error for Error {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match &*self {
-            Error::Io(ref err) => Some(err),
-            Error::Network(ref err) => Some(err),
-            Error::Twitter(ref err) => Some(err),
-            Error::Http(_, __) => None,
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Error::Io(ref err) => write!(f, "Error: IO: {}", err),
-            Error::Network(ref err) => write!(f, "Error: Network: {}", err),
-            Error::Twitter(ref err) => write!(f, "Error: Twitter: {}", err),
-            Error::Http(ref code, ref msg) => write!(f, "Error: HTTP {}: {}", code, msg),
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::Io(err)
-    }
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(err: reqwest::Error) -> Error {
-        Error::Network(err)
-    }
+#[derive(Error, Debug)]
+pub enum TwitterError {
+    #[error("IO failed: {0}")]
+    Io(#[from] io::Error),
+    #[error("OAuth failed: {0}")]
+    Sign(#[from] reqwest_oauth1::Error),
+    #[error("reqwest failed: {0}")]
+    Network(#[from] reqwest::Error),
+    #[error("JSON deserialization failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Twitter data read error: {0}")]
+    Data(#[from] TwitterDataError),
+    #[error("Twitter error: {0}")]
+    Twitter(#[from] TwitterAccessError),
 }
 
 #[derive(Debug)]
-pub struct TwitterError {
+pub struct TwitterAccessError {
     pub code: u32,
     pub message: String,
 }
 
-impl error::Error for TwitterError {
+impl error::Error for TwitterAccessError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         None
     }
 }
 
-impl fmt::Display for TwitterError {
+impl fmt::Display for TwitterAccessError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error Code: {}: {}", self.code, self.message)
+    }
+}
+
+#[derive(Debug)]
+pub struct TwitterDataError {
+    pub field: String,
+    pub body: String,
+}
+
+impl TwitterDataError {
+    pub fn new<TField: Into<String>, TBody: Into<String>>(field: TField, body: TBody) -> Self {
+        TwitterDataError {
+            field: field.into(),
+            body: body.into(),
+        }
+    }
+}
+
+impl error::Error for TwitterDataError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+impl fmt::Display for TwitterDataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "field {} is required but not found or not acceptable: {}",
+            self.field, self.body
+        )
     }
 }
