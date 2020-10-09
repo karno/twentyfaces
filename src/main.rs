@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{Local, Utc};
 
 use errors::{ConfigurationError, Error};
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
@@ -43,11 +43,14 @@ async fn main_proc(api_key: &ApiKey, conf_file_path: &str, mut config: Config) {
         .watch(conf_file_path, RecursiveMode::Recursive)
         .unwrap();
     println!("Press CTRL+C to exit...");
-    let mut last_received = None;
+    let mut last_received_id = None;
     loop {
         // check configuration changes and read it
         if let Some(new_config) = check_config_update(&rx, conf_file_path) {
-            println!("Configuration file changed and reloaded at {}", Utc::now());
+            println!(
+                "Configuration file changed and reloaded at {}",
+                Local::now()
+            );
             // update config if it is valid
             config = match check_config(api_key, new_config).await {
                 Ok(c) => c,
@@ -60,9 +63,9 @@ async fn main_proc(api_key: &ApiKey, conf_file_path: &str, mut config: Config) {
             };
         }
         // receive recent timelines
-        last_received = recv_and_fire_trigger(&api_key, &config, last_received)
+        last_received_id = recv_and_fire_trigger(&api_key, &config, last_received_id)
             .await
-            .or(last_received);
+            .or(last_received_id);
         delay_for(Duration::from_secs(60)).await;
     }
 }
@@ -90,7 +93,6 @@ fn check_config_update(rx: &Receiver<DebouncedEvent>, conf_file_path: &str) -> O
 
             _ => {
                 // maybe the file has been changed
-                println!("Configuration file changed and reloaded at {}", Utc::now());
                 Some(Config::load(conf_file_path).expect("Failed to read the configuration file"));
             }
         },
