@@ -2,8 +2,8 @@ use reqwest_oauth1::OAuthClientProvider;
 
 use crate::config::{ApiKey, AuthInfo, AuthInfoConfigurer};
 
-use super::models::Status;
 use super::TwitterResult;
+use super::{models::Status, CheckSuccess};
 
 pub async fn home_timeline(
     api_key: &ApiKey,
@@ -19,7 +19,7 @@ pub async fn home_timeline(
         .query(&[("count", count.unwrap_or(20u32))])
         .send()
         .await?;
-    let body = resp.error_for_status()?.text().await?;
+    let body = resp.check_success().await?.text().await?;
     Ok(Status::deserialize_timeline(&body)?)
 }
 
@@ -37,6 +37,6 @@ pub async fn user_timeline(
         .query(&[("count", count.unwrap_or(20u32))])
         .send()
         .await?;
-    let body = resp.error_for_status()?.text().await?;
+    let body = resp.check_success().await?.text().await?;
     Ok(Status::deserialize_timeline(&body)?)
 }

@@ -1,3 +1,5 @@
 /target
 **/*.rs.bk
 *.yaml
+
+profile_icons

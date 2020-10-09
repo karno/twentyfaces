@@ -24,6 +24,6 @@ async fn get_rate_limit_status_core(
         .get(endpoint)
         .send()
         .await?;
-    resp.error_for_status()?;
+    resp.check_success().await?;
     Ok(())
 }

@@ -1,11 +1,13 @@
+use async_trait::async_trait;
 use thiserror::Error;
 
+pub mod account;
 pub mod auth;
 pub mod misc;
 pub mod models;
 pub mod statuses;
 
-use reqwest;
+use reqwest::{self, StatusCode};
 use std::error;
 use std::fmt;
 use std::io;
@@ -30,7 +32,7 @@ pub enum TwitterError {
 
 #[derive(Debug)]
 pub struct TwitterAccessError {
-    pub code: u32,
+    pub code: StatusCode,
     pub message: String,
 }
 
@@ -73,5 +75,26 @@ impl fmt::Display for TwitterDataError {
             "field {} is required but not found or not acceptable: {}",
             self.field, self.body
         )
+    }
+}
+
+#[async_trait]
+pub(self) trait CheckSuccess: Sized {
+    async fn check_success(self) -> TwitterResult<Self>;
+}
+
+#[async_trait]
+impl CheckSuccess for reqwest::Response {
+    async fn check_success(self) -> TwitterResult<Self> {
+        let status = self.status();
+        if status.is_client_error() || status.is_server_error() {
+            let text = self.text().await?;
+            Err(TwitterError::Twitter(TwitterAccessError {
+                code: status,
+                message: text,
+            }))
+        } else {
+            Ok(self)
+        }
     }
 }

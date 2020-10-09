@@ -1,5 +1,6 @@
 use chrono::Utc;
-use errors::Error;
+
+use errors::{ConfigurationError, Error};
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use regex::Regex;
 use twitter_api::{misc::check_user_auth, models::Status, statuses};
@@ -9,7 +10,7 @@ mod errors;
 mod init;
 mod twitter_api;
 
-use std::{sync::mpsc::channel, sync::mpsc::Receiver, thread, time::Duration};
+use std::{sync::mpsc::channel, sync::mpsc::Receiver, time::Duration};
 
 use config::*;
 use tokio::{self, time::delay_for};
@@ -23,13 +24,14 @@ async fn main() {
     let api_key = init::load_or_init_api_key(TOKEN_FILE)
         .await
         .expect("failed to load the token file.");
+    // load or init configuration
     let conf = init::load_or_init_config(&api_key, CONFIG_FILE)
         .await
         .expect("failed to load the configuration file.");
-    // check authentication validity
-    check_user_auth(&api_key, conf.auth_info())
+    // check configuration validity
+    let conf = check_config(&api_key, conf)
         .await
-        .expect("authorization token has been invalidated or expored. please re-configure it.");
+        .expect("invalid configuration detected.");
     main_proc(&api_key, CONFIG_FILE, conf).await;
 }
 
@@ -46,11 +48,12 @@ async fn main_proc(api_key: &ApiKey, conf_file_path: &str, mut config: Config) {
         // check configuration changes and read it
         if let Some(new_config) = check_config_update(&rx, conf_file_path) {
             println!("Configuration file changed and reloaded at {}", Utc::now());
-            // check authentication validity
-            config = match check_user_auth(&api_key, new_config.auth_info()).await {
-                Ok(_) => new_config,
-                Err(_) => {
+            // update config if it is valid
+            config = match check_config(api_key, new_config).await {
+                Ok(c) => c,
+                Err(e) => {
                     println!("[ERROR] The new token configured in the file seems be invalid.");
+                    println!("        {:?}", e);
                     println!("        New configuration is not applied.");
                     config
                 }
@@ -62,6 +65,14 @@ async fn main_proc(api_key: &ApiKey, conf_file_path: &str, mut config: Config) {
             .or(last_received);
         delay_for(Duration::from_secs(60)).await;
     }
+}
+
+async fn check_config(api_key: &ApiKey, config: Config) -> Result<Config, Error> {
+    check_user_auth(&api_key, config.auth_info()).await.map_err(|e| ConfigurationError::new(
+        format!("Configuration error: authorization token has been invalidated or expired.\ndetail: {}", e)
+    ))?;
+    // check configuration validity
+    config.validate(&api_key).await
 }
 
 fn check_config_update(rx: &Receiver<DebouncedEvent>, conf_file_path: &str) -> Option<Config> {
@@ -111,20 +122,28 @@ async fn recv_and_fire_trigger(
             let max_id = statuses.get(0).map(|s| s.id);
             let triggered_profile = statuses
                 .into_iter()
-                .filter(|f| last_received.map(|l| f.id > l).unwrap_or(true))
-                .filter_map(|f| check_triggered_profile(&f, config))
+                .filter(|s| last_received.map(|l| s.id > l).unwrap_or(true))
+                .filter_map(|s| check_triggered_profile(&s, config).map(|t| (s, t)))
                 .next();
 
-            if let Some(profile) = triggered_profile {
-                print!("Profile triggered: {}, applying...", profile.key);
-                // profile is triggered!
-                let resolved = profile.resolve(config.profiles());
-                match resolved {
-                    Ok(r) => match r.apply(api_key, config).await {
-                        Ok(_) => println!(" -> applied!"),
-                        Err(a) => println!(" -> failed X(\n{}", a),
-                    },
-                    Err(e) => println!("Invalid configuration detected: {}", e),
+            if let Some((status, profile)) = triggered_profile {
+                println!(
+                    "Profile \"{}\" triggered by status: {}",
+                    profile.key, status.text
+                );
+                if last_received.is_none() {
+                    println!("this is dry-run mode, so not triggered.");
+                } else {
+                    print!("applying...");
+                    // profile is triggered!
+                    let resolved = profile.resolve(config.profiles());
+                    match resolved {
+                        Ok(r) => match r.apply(api_key, config).await {
+                            Ok(_) => println!(" -> applied!"),
+                            Err(a) => println!(" -> failed X(\n{}", a),
+                        },
+                        Err(e) => println!("Invalid configuration detected: {}", e),
+                    }
                 }
             }
 
@@ -139,18 +158,16 @@ async fn recv_and_fire_trigger(
 }
 
 fn check_triggered_profile<'a>(status: &Status, config: &'a Config) -> Option<&'a Profile> {
-    println!("received: {:?}", status);
-
     if status.retweeted_status.is_some() && !config.property().trigger_retweet {
         // this is retweet
         return None;
     }
     if status.quoted_status.is_some() && !config.property().trigger_quote {
-        // this is retweet
+        // this is quoted tweet
         return None;
     }
     if status.in_reply_to_status_id.is_some() && !config.property().trigger_reply {
-        // this is retweet
+        // this is reply
         return None;
     }
     for profile in config.profiles() {
@@ -187,8 +204,4 @@ fn check_trigger<T: AsRef<str>>(trigger: &T, text: &str) -> bool {
 
 fn check_match(pattern: &Regex, text: &str) -> bool {
     pattern.is_match(text)
-}
-
-async fn apply_status(api_key: &ApiKey, profile: &ResolvedProfile<'_>) -> Result<(), Error> {
-    Ok(())
 }

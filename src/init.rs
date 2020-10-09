@@ -7,8 +7,6 @@ use futures::future::TryFutureExt;
 use std::iter::Iterator;
 use std::path;
 
-pub static DEFAULT_ID: u64 = 0;
-
 pub async fn load_or_init_api_key(token_file: &str) -> Result<ApiKey, ConfigError> {
     let token_path = path::Path::new(token_file);
     if token_path.exists() {

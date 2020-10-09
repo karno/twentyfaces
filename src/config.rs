@@ -1,6 +1,7 @@
 use crate::{
-    errors::ConfigurationError, errors::Error, twitter_api::misc::check_user_auth,
-    twitter_api::TwitterResult,
+    errors::ConfigurationError, errors::Error, twitter_api::account::update_profile,
+    twitter_api::account::update_profile_banner, twitter_api::account::update_profile_image,
+    twitter_api::misc::check_user_auth, twitter_api::TwitterResult,
 };
 
 use super::twitter_api;
@@ -102,7 +103,7 @@ impl Config {
         &self.property
     }
 
-    pub async fn validate(&mut self, api_key: &ApiKey) -> Result<(), Error> {
+    pub async fn validate(mut self, api_key: &ApiKey) -> Result<Self, Error> {
         // check authentication information
         let _ = check_user_auth(api_key, self.auth_info()).await?;
         // check profiles
@@ -150,7 +151,31 @@ impl Config {
                 .map_err(|e| ConfigurationError::new(format!("invalid regex pattern: {:?}", e)))?;
         }
 
-        Ok(())
+        // 4. check file existence
+        for p in self.profiles.iter() {
+            // check profile image
+            if let Some(ref image) = p.image {
+                if !Path::new(image).exists() {
+                    return Err(ConfigurationError::new(format!(
+                        "Specified profile image {} is not found in profile {}",
+                        image, p.key
+                    ))
+                    .into());
+                }
+            }
+            // check banner image
+            if let Some(ref banner) = p.banner {
+                if !Path::new(banner).exists() {
+                    return Err(ConfigurationError::new(format!(
+                        "Specified profile banner {} is not found in profile {}",
+                        banner, p.key
+                    ))
+                    .into());
+                }
+            }
+        }
+
+        Ok(self)
     }
 }
 
@@ -196,7 +221,6 @@ pub struct Property {
     pub trigger_retweet: bool,
     pub trigger_quote: bool,
     pub trigger_reply: bool,
-    pub trigger_direct_messages: bool,
 }
 
 impl Property {
@@ -205,7 +229,6 @@ impl Property {
             trigger_retweet: false,
             trigger_quote: false,
             trigger_reply: false,
-            trigger_direct_messages: false,
         }
     }
 }
@@ -250,8 +273,8 @@ impl Profile {
             url: Some("example.com".to_string()),
             location: Some("sample location".to_string()),
             description: Some("this is sample profile.".to_string()),
-            image: Some("~/profile_image.png".to_string()),
-            banner: Some("~/banner_image.png".to_string()),
+            image: None,
+            banner: None,
             intro: Some("Hello, I'm a example profile!".to_string()),
             match_instances: vec![regex::Regex::new(".*change.*sample").unwrap()],
         }
@@ -301,7 +324,23 @@ impl Profile {
 impl ResolvedProfile<'_> {
     pub async fn apply(&self, api_key: &ApiKey, config: &Config) -> TwitterResult<()> {
         let auth_info = config.auth_info();
+        if let Some(image_path) = self.image {
+            update_profile_image(api_key, auth_info, image_path.as_ref()).await?;
+        }
 
+        if let Some(image_path) = self.banner {
+            update_profile_banner(api_key, auth_info, image_path.as_ref()).await?
+        }
+
+        update_profile(
+            api_key,
+            auth_info,
+            self.name.map(|s| s.as_str()),
+            self.url.map(|s| s.as_str()),
+            self.location.map(|s| s.as_str()),
+            self.description.map(|s| s.as_str()),
+        )
+        .await?;
         Ok(())
     }
 }
