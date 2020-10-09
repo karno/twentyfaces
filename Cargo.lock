@@ -1101,6 +1101,8 @@ dependencies = [
 [[package]]
 name = "reqwest-oauth1"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1b9671e7326b9daeb9c0657fa659b3556752e8b4cc70c44c2d36b4983bf6241"
 dependencies = [
  "async-trait",
  "http",
