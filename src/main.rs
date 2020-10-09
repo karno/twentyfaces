@@ -38,35 +38,43 @@ async fn main() {
 async fn main_proc(api_key: &ApiKey, conf_file_path: &str, mut config: Config) {
     // activate config file watcher
     let (tx, rx) = channel();
-    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_secs(1)).unwrap();
+    let mut watcher: RecommendedWatcher = Watcher::new(tx, Duration::from_millis(500)).unwrap();
     watcher
         .watch(conf_file_path, RecursiveMode::Recursive)
         .unwrap();
     println!("Press CTRL+C to exit...");
+    let receive_interval = chrono::Duration::seconds(10);
     let mut last_received_id = None;
     loop {
-        // check configuration changes and read it
-        if let Some(new_config) = check_config_update(&rx, conf_file_path) {
-            println!(
-                "Configuration file changed and reloaded at {}",
-                Local::now()
-            );
-            // update config if it is valid
-            config = match check_config(api_key, new_config).await {
-                Ok(c) => c,
-                Err(e) => {
-                    println!("[ERROR] The new token configured in the file seems be invalid.");
-                    println!("        {:?}", e);
-                    println!("        New configuration is not applied.");
-                    config
-                }
-            };
-        }
-        // receive recent timelines
         last_received_id = recv_and_fire_trigger(&api_key, &config, last_received_id)
             .await
             .or(last_received_id);
-        delay_for(Duration::from_secs(60)).await;
+        let next_recv = Utc::now() + receive_interval;
+        // spin wait
+        loop {
+            // check configuration changes and read it
+            if let Some(new_config) = spin_until_update(&rx, conf_file_path, receive_interval).await
+            {
+                println!(
+                    "Configuration file changed and reloaded at {}",
+                    Local::now()
+                );
+                // update config if it is valid
+                config = match check_config(api_key, new_config).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        println!("[ERROR] The new token configured in the file seems be invalid.");
+                        println!("        {:?}", e);
+                        println!("        New configuration is not applied.");
+                        config
+                    }
+                };
+            }
+            // wait until we have to acquire new timeline information
+            if Utc::now() > next_recv {
+                break;
+            }
+        }
     }
 }
 
@@ -78,35 +86,59 @@ async fn check_config(api_key: &ApiKey, config: Config) -> Result<Config, Error>
     config.validate(&api_key).await
 }
 
+async fn spin_until_update(
+    rx: &Receiver<DebouncedEvent>,
+    conf_file_path: &str,
+    timeout: chrono::Duration,
+) -> Option<Config> {
+    let deadline = Utc::now() + timeout;
+    loop {
+        // check configuration has been changed
+        if let Some(c) = check_config_update(rx, conf_file_path) {
+            return Some(c);
+        }
+        // check
+        if Utc::now() > deadline {
+            return None;
+        }
+        // 0.1 msec await
+        tokio::time::delay_for(Duration::from_millis(100)).await;
+    }
+}
+
 fn check_config_update(rx: &Receiver<DebouncedEvent>, conf_file_path: &str) -> Option<Config> {
     match rx.try_recv() {
-        Ok(event) => match event {
-            // fatal errors
-            notify::DebouncedEvent::NoticeRemove(_)
-            | notify::DebouncedEvent::Remove(_)
-            | notify::DebouncedEvent::Rename(_, _) => {
-                panic!("Configuration file had been removed and that is unexpected behavior.")
+        Ok(event) => {
+            match event {
+                // fatal errors
+                notify::DebouncedEvent::NoticeRemove(_)
+                | notify::DebouncedEvent::Remove(_)
+                | notify::DebouncedEvent::Rename(_, _) => {
+                    panic!("Configuration file had been removed and that is unexpected behavior.")
+                }
+                notify::DebouncedEvent::Error(e, p) => {
+                    panic!("Configuration watcher failed: {:?} - {:?}", e, p);
+                }
+                _ => {
+                    // maybe the file has been changed
+                    Some(
+                        Config::load(conf_file_path)
+                            .expect("Failed to read the configuration file"),
+                    )
+                }
             }
-            notify::DebouncedEvent::Error(e, p) => {
-                panic!("Configuration watcher failed: {:?} - {:?}", e, p);
-            }
-
-            _ => {
-                // maybe the file has been changed
-                Some(Config::load(conf_file_path).expect("Failed to read the configuration file"));
-            }
-        },
+        }
         Err(err) => match err {
             std::sync::mpsc::TryRecvError::Empty => {
                 // nothing to do
+                None
             }
             std::sync::mpsc::TryRecvError::Disconnected => {
                 // watcher failed
                 panic!("Configuration watcher has been exited unexpectedly.")
             }
         },
-    };
-    None
+    }
 }
 
 async fn recv_and_fire_trigger(
@@ -114,7 +146,8 @@ async fn recv_and_fire_trigger(
     config: &Config,
     last_received: Option<u64>,
 ) -> Option<u64> {
-    let recvd = statuses::user_timeline(api_key, config.auth_info(), Some(200u32)).await;
+    let recvd =
+        statuses::user_timeline(api_key, config.auth_info(), Some(200u32), last_received).await;
     match recvd {
         Ok(mut statuses) => {
             // order by descending
@@ -134,7 +167,7 @@ async fn recv_and_fire_trigger(
                     profile.key, status.text
                 );
                 if last_received.is_none() {
-                    println!("this is dry-run mode, so not triggered.");
+                    println!("last_received property was not specified, so treat as dry-run mode and not triggered.");
                 } else {
                     print!("applying...");
                     // profile is triggered!
@@ -160,6 +193,7 @@ async fn recv_and_fire_trigger(
 }
 
 fn check_triggered_profile<'a>(status: &Status, config: &'a Config) -> Option<&'a Profile> {
+    println!("r:{}", status.text);
     if status.retweeted_status.is_some() && !config.property().trigger_retweet {
         // this is retweet
         return None;
