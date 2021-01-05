@@ -104,7 +104,14 @@ fn acquire_user_input<'a>(keys: &[&'a str]) -> Option<Vec<String>> {
             stdout().flush().unwrap();
             input.clear();
             if stdin().read_line(&mut input).is_ok() {
-                match input.chars().next().unwrap_or('y') {
+                match input
+                    .chars()
+                    .filter(|&c| {
+                        ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
+                    })
+                    .next()
+                    .unwrap_or('y')
+                {
                     'Y' | 'y' | '\n' => return Some(inputs),
                     'N' | 'n' => {
                         println!("please re-input.");
