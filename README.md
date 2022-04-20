@@ -1,4 +1,4 @@
-# twentyfaces
+# twentyfaces🎭
 The Fiend with Twenty Faces on Twitter.
 
 ## What's this?
