@@ -13,7 +13,7 @@ mod twitter_api;
 use std::{sync::mpsc::channel, sync::mpsc::Receiver, time::Duration};
 
 use config::*;
-use tokio::{self, time::delay_for};
+use tokio;
 
 static TOKEN_FILE: &str = "token.yaml";
 static CONFIG_FILE: &str = "config.yaml";
@@ -102,7 +102,7 @@ async fn spin_until_update(
             return None;
         }
         // 0.1 msec await
-        tokio::time::delay_for(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
